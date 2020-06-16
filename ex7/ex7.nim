@@ -1,5 +1,5 @@
-import compiler / [nimeval, renderer, ast]
-import osproc, strutils, algorithm, json, tables
+import compiler / [nimeval, renderer, ast, types, llstream, vmdef, vm]
+import osproc, strutils, algorithm
 
 # This uses your Nim install to find the standard library instead of hard-coding it
 var
@@ -9,17 +9,26 @@ nimlibs.sort
 
 let
   intr = createInterpreter("script.nims", nimlibs)
-intr.evalScript()
+  script = readFile("script.nims")
 
-# Grab the complex type as a JSON string
+# We forward declare scriptProc here to ensure it has the right signature
+# Specifying a llStream to read from will not run top-level things from the
+# script like it usually would. The name given above will only be used for errors.
+intr.implementRoutine("*", "script", "compilerProc", proc (a: VmArgs) =
+  echo "This is happening in compile-time code"
+  a.setResult(a.getInt(0) + a.getInt(1))
+)
+intr.evalScript(llStreamOpen("""
+proc scriptProc*(one, two: int): int
+proc compilerProc(one, two: int): int = discard
+""" & script))
+
+
 let
-  jsonstr = intr.getGlobalValue(intr.selectUniqueSymbol("jsonTable")).getStr()
-  parsed = parseJson(jsonstr)
-  table = parsed.to(Table[string, int])
+  foreignProc = intr.selectRoutine("scriptProc")
+  ret = intr.callRoutine(foreignProc, [newIntNode(nkIntLit, 10), newIntNode(nkIntLit, 32)])
 
-# Access the data in the complex type as normal Nim code
-echo table["hello"]
-echo table["world"]
+echo ret.intVal
 
 intr.destroyInterpreter()
 
